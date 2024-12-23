@@ -97,7 +97,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'dva',
-        'HOST':'localhost',
+        'HOST': "127.0.0.1",#'localhost',
         'USER': 'root',
         'PASSWORD': 'your_password'
 

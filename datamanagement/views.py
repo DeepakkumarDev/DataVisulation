@@ -119,9 +119,9 @@ class TableDetailView(APIView):
         'table_name': table_name,
         'grafana_url': grafana_url,
         }
-        return render(request, 'grafana_dashboard.html', context)
         # return Response(context)
     
+        return render(request, 'grafana_dashboard.html', context)
         
 
 def grafana_dashboard(request, table_name):
