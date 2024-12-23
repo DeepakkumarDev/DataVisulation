@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <script>
+        // Function to handle login
+        async function loginUser(event) {
+            event.preventDefault(); // Prevent the form from submitting in the traditional way
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            // Make the login request to Djoser's JWT token endpoint
+            const response = await fetch('http://localhost:8000/auth/jwt/create/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: username,
+                    password: password
+                })
+            });
+
+            const data = await response.json();
+
+            // If login is successful
+            if (response.ok) {
+                // Store the JWT access token in localStorage
+                localStorage.setItem('access_token', data.access);
+                alert('Login successful');
+                // Redirect to another page or display the user's dashboard
+                window.location.href = "/api/protected/";
+                
+            } else {
+                // Handle login failure
+                alert('Login failed. Please check your credentials.');
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Login</h1>
+    <form onsubmit="loginUser(event)">
+        <label for="username">Username:</label>
+        <input type="text" id="username" name="username" required><br>
+
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" required><br>
+
+        <button type="submit">Login</button>
+    </form>
+</body>
+</html>

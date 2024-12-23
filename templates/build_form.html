@@ -1,0 +1,11 @@
+<form method="POST" action="{% url 'build-table' %}">
+    {% csrf_token %}
+    
+    <label for="tables">Select Tables to Build:</label><br>
+    {% for table in table_names %}
+        <input type="checkbox" name="tables" value="{{ table }}" id="table_{{ table }}">
+        <label for="table_{{ table }}">{{ table }}</label><br>
+    {% endfor %}
+    
+    <button type="submit">Build</button>
+</form>

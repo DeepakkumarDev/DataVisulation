@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Protected Page</title>
+    <script>
+        // Function to fetch protected data
+        async function fetchProtectedData() {
+            // Get the JWT access token from localStorage
+            const token = localStorage.getItem('access_token');
+
+            // If no token exists, redirect to the login page
+            if (!token) {
+                alert('You are not logged in. Redirecting to login.');
+                window.location.href = "/login.html";
+                return;
+            }
+
+            // Make the request to the protected API endpoint
+            const response = await fetch('http://localhost:8000/api/protected/', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            const data = await response.json();
+
+            // If the request is successful, display the protected data
+            if (response.ok) {
+                document.getElementById('protected-data').innerText = JSON.stringify(data);
+            } else {
+                // Handle error (e.g., token might be expired)
+                alert('Failed to fetch data. Please log in again.');
+                window.location.href = "/login.html";
+            }
+        }
+
+        // Fetch the protected data when the page loads
+        window.onload = fetchProtectedData;
+    </script>
+</head>
+<body>
+    <h1>Protected Data</h1>
+    <p id="protected-data"></p>
+</body>
+</html>

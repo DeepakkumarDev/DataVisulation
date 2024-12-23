@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Tables</title>
+</head>
+<body>
+    <h1>Select Tables to Build</h1>
+    <form method="POST" action="{% url 'build-table' %}">
+        {% csrf_token %}
+        <div>
+            {% for table in table_names %}
+                <div>
+                    <input type="checkbox" id="table_{{ table }}" name="tables" value="{{ table }}">
+                    <label for="table_{{ table }}">{{ table }}</label>
+                </div>
+            {% endfor %}
+        </div>
+        <button type="submit">Build</button>
+    </form>
+</body>
+</html>

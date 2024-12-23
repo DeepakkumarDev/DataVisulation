@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logout</title>
+    <script>
+        // Function to handle logout
+        function logoutUser() {
+            // Remove the JWT access token from localStorage
+            localStorage.removeItem('access_token');
+            alert('You have been logged out.');
+            // Redirect to the login page
+            window.location.href = "/login.html";
+        }
+    </script>
+</head>
+<body>
+    <h1>Logout</h1>
+    <button onclick="logoutUser()">Logout</button>
+</body>
+</html>
