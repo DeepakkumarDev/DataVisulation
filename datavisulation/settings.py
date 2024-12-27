@@ -58,6 +58,13 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=5),
 }
 
+DJOSER ={
+    'SERIALIZERS': {
+        'user_create':'core.serializers.UserCreateSerializer',
+        'current_user':'core.serializers.UserSerializer',
+    }
+}
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -100,7 +107,6 @@ DATABASES = {
         'HOST':'localhost',
         'USER': 'root',
         'PASSWORD': 'your_password'
-
     }
 }
 
@@ -142,6 +148,7 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 MEIDA_URL ='/media'
+
 MEDIA_ROOT = os.path.join(BASE_DIR,'media')
 
 

@@ -1,4 +1,4 @@
-
+{% comment %} 
     <style>
         .main-container {
             display: flex;
@@ -60,4 +60,23 @@
                 <a href="{{ grafana_url }}" target="_blank">Edit Dashboard</a>
             </div>
         </div>
-    </div>
+    </div> {% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grafana Dashboard</title>
+</head>
+<body>
+    <h1>Embedded Grafana Dashboard</h1>
+    
+    <iframe
+        src="{{ grafana_url }}"
+        width="100%"
+        height="800"
+        frameborder="0">
+    </iframe>
+    
+</body>
+</html>

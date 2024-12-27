@@ -4,7 +4,8 @@ from rest_framework.routers import DefaultRouter
 
 router = DefaultRouter()
 router.register('data-clean',views.DataCleanViewSet,basename='data-clean')
-
+router.register('remove-column',views.DataOperationViewSet,basename='remove-column')
+router.register('customers',views.CustomerViewSet,basename='customers')
 
 urlpatterns = [
     path('',include(router.urls)),
@@ -16,9 +17,5 @@ urlpatterns = [
     path('visulaize/',views.TableView.as_view(),name='table-list'),
     path('visulaize/<int:pk>/',views.TableDetailView.as_view() ,name='table-detail'),
     path('build-table/', views.BuildTableView.as_view(), name='build-table'),
-
-    path('login/', views.login_view, name='login'),
-    path('logout/', views.logout_view, name='logout'),
-    path('protected/', views.protected_page, name='protected'),
-
+    path('rename-columns/<int:pk>/',views.RenameColumnAPIView.as_view(),name='rename-columns'),
 ]

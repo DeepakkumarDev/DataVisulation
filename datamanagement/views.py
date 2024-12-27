@@ -1,37 +1,50 @@
 import csv
+import os 
+import pandas as pd 
+from datetime import datetime
 from django.shortcuts import render,get_object_or_404
 from django.db import transaction
 from django.db.models import Value
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view,action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated,IsAdminUser
 from rest_framework import status
-from .models import FileUpload,UserTable,CreateTable
+from .models import FileUpload,UserTable,CreateTable,Customer
 from .serializers import FileUploadSerializer,UserTableSerializer,CreateTableSerializer,AppendTableSerializer,\
-    DataCleanSerializer,TableVisulationSerializer,BuildTableSerializer
+    DataCleanSerializer,TableVisulationSerializer,BuildTableSerializer,CustomerSerializer
+from .dataclean_serializers import DataOperationSerializer,RenameColumnSerializer
 
 
 
-from django.shortcuts import render
-from django.contrib.auth.decorators import login_required
+# class CustomerViewSet(CreateModelMixin,RetrieveModelMixin,UpdateModelMixin,GenericViewSet):
+class CustomerViewSet(ModelViewSet):
+    queryset = Customer.objects.all()
+    serializer_class = CustomerSerializer 
+    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminUser]
+    # permission_classes = [DjangoModelPermissions]
+    # permission_classes =[FullDjangoModelPermissions]
+    # permission_classes =[DjangoModelPermissionsOrAnonReadOnly]
+    # def get_permissions(self):
+    #     if self.request.method == 'GET':
+    #         return [AllowAny()]
+    #     return [IsAuthenticated()]
 
-def login_view(request):
-    return render(request, 'registration/login.html')
-
-def logout_view(request):
-    return render(request, 'logout.html')
-
-@login_required
-def protected_page(request):
-    return render(request, 'protected_page.html')
-
-
-
-
-
-
+    @action(detail=False,methods=['GET','PUT'],permission_classes=[IsAuthenticated])
+    def me(self,request):
+        # (customer,created) = Customer.objects.get_or_create(user_id=request.user.id)
+        customer = Customer.objects.get(user_id=request.user.id)
+        if request.method == 'GET':
+            serializer = CustomerSerializer(customer)
+            return Response(serializer.data)
+        elif request.method == 'PUT':
+            serializer = CustomerSerializer(customer,data=request.data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        
 
 
 
@@ -40,6 +53,118 @@ def protected_page(request):
 
 
 
+
+
+class RenameColumnAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        file_id = self.kwargs.get('pk')
+        columns = []
+
+        try:
+            file_instance = FileUpload.objects.get(user=self.request.user, id=file_id)
+            file_path = file_instance.file_name.path
+
+            if os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+                columns = list(df.columns)
+            else:
+                return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+        except FileUpload.DoesNotExist:
+            return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({"columns": columns}, status=status.HTTP_200_OK)
+
+    def put(self, request, *args, **kwargs):
+        file_id = self.kwargs.get('pk')
+        data = request.data
+
+        # Deserialize the data using the RenameColumnSerializer
+        serializer = RenameColumnSerializer(data=data)
+        if serializer.is_valid():
+            new_column_names = serializer.validated_data.get('new_column_names', {})
+            renamed_columns = []
+
+            try:
+                file_instance = FileUpload.objects.get(user=self.request.user, id=file_id)
+                file_path = file_instance.file_name.path
+
+                if os.path.exists(file_path):
+                    df = pd.read_csv(file_path)
+
+                    for old_col, new_col in new_column_names.items():
+                        if old_col in df.columns:
+                            df.rename(columns={old_col: new_col}, inplace=True)
+                            renamed_columns.append((old_col, new_col))
+                        else:
+                            return Response({"error": f"Column '{old_col}' not found in the file"}, status=status.HTTP_400_BAD_REQUEST)
+
+                    # Save the updated DataFrame back to the file
+                    df.to_csv(file_path, index=False)
+                    return Response({"message": "Columns renamed successfully", "renamed_columns": renamed_columns}, status=status.HTTP_200_OK)
+                else:
+                    return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            except FileUpload.DoesNotExist:
+                return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DataOperationViewSet(ModelViewSet):
+    http_method_names = ['get', 'put', 'delete']
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = FileUpload.objects.filter(user=self.request.user)
+        if self.request.method in ['PUT', 'GET']:
+            file_id = self.kwargs.get('pk') 
+            columns = []
+            try:
+                file_instance = FileUpload.objects.get(user=self.request.user, id=file_id)
+                file_path = file_instance.file_name.path
+                if os.path.exists(file_path):
+                    df = pd.read_csv(file_path)
+                    columns = list(df.columns)
+                else:
+                    return queryset.none()
+            except FileUpload.DoesNotExist:
+                return queryset.none()  # Return an empty queryset if file not found
+            except FileNotFoundError as e:
+                return queryset.annotate(column_names=Value(f"Error: {str(e)}"))
+            except Exception as e:
+                return queryset.annotate(column_names=Value(f"Error reading file: {str(e)}"))
+            queryset = queryset.annotate(column_names=Value(', '.join(columns) if columns else "No columns found"))
+        return queryset
+
+    def get_serializer_class(self):
+        if self.request.method in ['GET', 'DELETE']:
+            return FileUploadSerializer
+        elif self.request.method == 'PUT':
+            return DataOperationSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['file_id'] = self.kwargs.get('pk')  
+        context['request'] = self.request
+        return context
+
+    def update(self, request, *args, **kwargs):
+        user = request.user
+        if user.is_anonymous:
+            return Response({'error': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        instance = self.get_object()  # Fetch the object instance
+        serializer = self.get_serializer(instance, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+
+        return Response({
+            "message": result.get('operation', 'Operation completed'),
+            "file_name": result['file_name'],
+            "removed_columns": f"Columns removed: {result['removed_columns']}"
+        }, status=status.HTTP_200_OK)
 
 
 
@@ -103,23 +228,90 @@ class TableView(APIView):
         serializer =TableVisulationSerializer(queryset, many=True)
         return Response(serializer.data)
 
-class TableDetailView(APIView):    
+
+
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+from django.utils.timezone import datetime
+from django.http import JsonResponse
+
+class TableDetailView(APIView):
     permission_classes = [IsAuthenticated]
-    def get(self,request,pk):
+
+    def get(self, request, pk):
+        # Ensure the user is authenticated
+        if request.user.is_anonymous:
+            return JsonResponse({"detail": "Authentication credentials were not provided."}, status=401)
+
+        # Fetch the table details for the authenticated user
         table = get_object_or_404(
             CreateTable, 
-            table_name__id=pk,  # Use `table_name__id` to filter by the `id` of UserTable
-            user=request.user,  # Ensure that the user is authenticated
-            database_table=True  # Ensure that the table has `database_table=True`
+            table_name__id=pk,  # Fetch table by the primary key
+            user=request.user,  # Ensure the table belongs to the authenticated user
+            database_table=True  # Ensure the table has `database_table=True`
         )
+
+        org_id = 1
+        timezone = 'browser'
+        
+        # Make sure `table_name` exists and is not empty
         table_name = table.table_name.table_name
-        base_url = 'http://localhost:3000/d/ddqmlj39trtoga/dva'
-        grafana_url = f"{base_url}?var-table={table_name}&kiosk"
-        context = {
-        'table_name': table_name,
-        'grafana_url': grafana_url,
-        }
-        return render(request, 'grafana_dashboard.html', context)
+        if not table_name:
+            return JsonResponse({"detail": "Table name is missing."}, status=400)
+
+        # Dynamic date range
+        from_time = datetime.now().isoformat()  # Replace with actual time if needed
+        to_time = datetime.now().isoformat()    # Replace with actual time if needed
+
+        # Construct the Grafana URL dynamically
+        grafana_url = f'http://localhost:3000/d/ddqmlj39trtoga/data-visulation-dashboard-copysd?' \
+                      f'orgId={org_id}&from={from_time}&to={to_time}&timezone={timezone}&var-table_name={table_name}'
+        
+        # Return the Grafana URL and other information
+        return JsonResponse({
+            'grafana_url': grafana_url,
+            'table_name': table_name,
+        })
+
+
+
+
+
+
+
+# class TableDetailView(APIView):    
+#     permission_classes = [IsAuthenticated]
+#     def get(self,request,pk):
+#         table = get_object_or_404(
+#             CreateTable, 
+#             table_name__id=pk,  # Use `table_name__id` to filter by the `id` of UserTable
+#             user=request.user,  # Ensure that the user is authenticated
+#             database_table=True  # Ensure that the table has `database_table=True`
+#         )
+#         # table_name = table.table_name.table_name
+#         # base_url = 'http://localhost:3000/d/ddqmlj39trtoga/dva'
+#         # grafana_url = f"{base_url}?var-table={table_name}&kiosk"
+
+#         org_id = 1
+#         timezone = 'browser'
+        
+#         # Example: you can pass dynamic values based on user selection or logic
+#         table_name = 'dataecom_deepak_dev_mca22_du_fd126d99'
+        
+#         # Optional: Dynamic date range
+#         from_time = datetime.now().isoformat()  # Replace with actual time if needed
+#         to_time = datetime.now().isoformat()    # Replace with actual time if needed
+        
+#         # Build the Grafana URL dynamically
+#         grafana_url = f'http://localhost:3000/d/ddqmlj39trtoga/data-visulation-dashboard-copysd?' \
+#                     f'orgId={org_id}&from={from_time}&to={to_time}&timezone={timezone}&var-table_name={table_name}'
+    
+
+#         context = {
+#         'table_name': table_name,
+#         'grafana_url': grafana_url,
+#         }
+#         return render(request, 'grafana_dashboard.html', context)
         # return Response(context)
     
         
@@ -200,7 +392,6 @@ class DataCleanView(APIView):
 
 
     def get(self, request, pk):
-        # Fetch a single file for the authenticated user by primary key
         try:
             file = FileUpload.objects.get(user=request.user, pk=pk)
         except FileUpload.DoesNotExist:
@@ -264,10 +455,8 @@ class UserTableView(APIView):
 
 class FileUploadView(APIView):
     serializer_class = FileUploadSerializer
-    permission_classes = [IsAuthenticated]  # Ensure user is authenticated
-
+    permission_classes = [IsAuthenticated]  
     def get(self, request):
-        # Fetch files for the authenticated user only
         queryset = FileUpload.objects.filter(user=request.user)
         serializer = FileUploadSerializer(queryset, many=True)
         return Response(serializer.data)
@@ -283,16 +472,14 @@ class AppendDataView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # Filter the queryset to only include tables created by the authenticated user
         queryset = CreateTable.objects.filter(user=request.user)
         serializer = AppendTableSerializer(queryset, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        # Deserialize the incoming data and save it 
         serializer = AppendTableSerializer(data=request.data,context={'request': request})
         if serializer.is_valid():
-            serializer.save(user=request.user)  # Save the table with the authenticated user
+            serializer.save(user=request.user)  
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
             
@@ -301,19 +488,17 @@ class AppendDataView(APIView):
 
 class CreateTableView(APIView):
     serializer_class = CreateTableSerializer
-    permission_classes = [IsAuthenticated]  # Ensure only authenticated users can access this view
-
+    permission_classes = [IsAuthenticated]  
     def get(self, request):
-        # Filter the queryset to only include tables created by the authenticated user
-        queryset = CreateTable.objects.filter(user=request.user)
+        queryset = CreateTable.objects.filter(user=request.user).select_related('table_name','file_name')
         serializer = CreateTableSerializer(queryset, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        # Deserialize the incoming data and save it 
-        serializer = CreateTableSerializer(data=request.data,context={'request': request})
+        serializer = CreateTableSerializer(data=request.data, context={'request': request})
+        # serializer = CreateTableSerializer(data=request.data,context={'request': request})
         if serializer.is_valid():
-            serializer.save(user=request.user)  # Save the table with the authenticated user
+            serializer.save(user=request.user)  
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
         

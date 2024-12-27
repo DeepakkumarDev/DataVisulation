@@ -8,7 +8,17 @@ import random
 from django.db import connection, transaction
 from django.core.exceptions import ValidationError
 from rest_framework import serializers
-from .models import FileUpload,UserTable,CreateTable
+from .models import FileUpload,UserTable,CreateTable,Customer
+
+
+
+class CustomerSerializer(serializers.ModelSerializer):
+    user_id = serializers.IntegerField(read_only=True)
+    class Meta:
+        model = Customer 
+        fields = ['id','user_id','phone','birth_date']
+
+
 
 class BuildTableSerializer(serializers.Serializer):
     tables = serializers.ListField(child=serializers.CharField(max_length=255))
@@ -128,9 +138,31 @@ class UserTableSerializer(serializers.ModelSerializer):
 
 
 class AppendTableSerializer(serializers.ModelSerializer):
+    # class Meta:
+    #     model = CreateTable  # Make sure CreateTable is your model to store the table details
+    #     fields = ['table_name', 'file_name']  # Fields you want to accept in the serializer
+    table_name_id = serializers.PrimaryKeyRelatedField(queryset=UserTable.objects.none(), source='table_name')
+    file_name_id = serializers.PrimaryKeyRelatedField(queryset=FileUpload.objects.none(), source='file_name')
+
+    table_name = serializers.CharField(source='table_name.table_name', read_only=True)
+    file_name = serializers.CharField(source='file_name.file_name', read_only=True)
+
     class Meta:
-        model = CreateTable  # Make sure CreateTable is your model to store the table details
-        fields = ['table_name', 'file_name']  # Fields you want to accept in the serializer
+        model = CreateTable
+        fields = ['table_name_id', 'file_name_id', 'table_name', 'file_name', 'created_at']
+
+    def __init__(self, *args, **kwargs):
+        # Call the parent constructor
+        super(AppendTableSerializer, self).__init__(*args, **kwargs)
+
+        # Safely get the 'request' from context
+        request = self.context.get('request', None)
+
+        # If a request exists, filter the querysets based on the authenticated user
+        if request and hasattr(request, 'user'):
+            user = request.user
+            self.fields['table_name_id'].queryset = UserTable.objects.filter(user=user)
+            self.fields['file_name_id'].queryset = FileUpload.objects.filter(user=user)
 
     def create(self, validated_data):
         file_upload_instance = validated_data.get('file_name')
@@ -388,10 +420,42 @@ from rest_framework import serializers
 from .models import CreateTable
 import numpy as np
 
+# class CreateTableSerializer(serializers.ModelSerializer):
+#     table_name = serializers.CharField(source='table_name.table_name')
+#     file_name = serializers.CharField(source='file_name.file_name')
+#     class Meta:
+#         model = CreateTable
+#         fields = ['table_name', 'file_name', 'created_at']
+
+from rest_framework import serializers
+from .models import CreateTable, UserTable, FileUpload
+from rest_framework import serializers
+from .models import CreateTable, UserTable, FileUpload
+
 class CreateTableSerializer(serializers.ModelSerializer):
+    table_name_id = serializers.PrimaryKeyRelatedField(queryset=UserTable.objects.none(), source='table_name')
+    file_name_id = serializers.PrimaryKeyRelatedField(queryset=FileUpload.objects.none(), source='file_name')
+
+    table_name = serializers.CharField(source='table_name.table_name', read_only=True)
+    file_name = serializers.CharField(source='file_name.file_name', read_only=True)
+
     class Meta:
         model = CreateTable
-        fields = ['table_name', 'file_name', 'created_at']
+        fields = ['table_name_id', 'file_name_id', 'table_name', 'file_name', 'created_at']
+
+    def __init__(self, *args, **kwargs):
+        # Call the parent constructor
+        super(CreateTableSerializer, self).__init__(*args, **kwargs)
+
+        # Safely get the 'request' from context
+        request = self.context.get('request', None)
+
+        # If a request exists, filter the querysets based on the authenticated user
+        if request and hasattr(request, 'user'):
+            user = request.user
+            self.fields['table_name_id'].queryset = UserTable.objects.filter(user=user)
+            self.fields['file_name_id'].queryset = FileUpload.objects.filter(user=user)
+
 
     def create(self, validated_data):
         file_upload_instance = validated_data.get('file_name')
