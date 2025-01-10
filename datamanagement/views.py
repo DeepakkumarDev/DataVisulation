@@ -16,7 +16,7 @@ from .serializers import FileUploadSerializer,UserTableSerializer,CreateTableSer
     DataCleanSerializer,TableVisulationSerializer,BuildTableSerializer,CustomerSerializer,RemoveColumnSerializer
 from .dataclean_serializers import DataOperationSerializer,RenameColumnSerializer
 
-
+import shutil
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -34,7 +34,12 @@ from rest_framework.decorators import action
 import pandas as pd
 import os
 from .models import FileUpload
-from .serializers import RemoveColumnSerializer
+from .serializers import RemoveColumnSerializer,RenameColumnsSerializer,ChangeDataTypeSerializer,FillMissingValueSerializer,RemoveDuplicateSerializer
+
+
+
+
+
 
 class FileUploadViewSet(ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -64,6 +69,16 @@ class FileUploadViewSet(ModelViewSet):
     def get_serializer_class(self):
         if self.action == 'removecolumn':
             return RemoveColumnSerializer
+        elif self.action == "renamecolumn":
+            return RenameColumnsSerializer
+        elif self.action == "fillmissingvalue":
+            return FillMissingValueSerializer
+    
+        elif self.action == 'removeduplicates':
+            return RemoveDuplicateSerializer
+        
+        elif self.action == "changedatatype":
+            return ChangeDataTypeSerializer
         return FileUploadSerializer
 
     def get_serializer_context(self):
@@ -97,11 +112,136 @@ class FileUploadViewSet(ModelViewSet):
             return Response(result, status=status.HTTP_200_OK)
         
     
-    @action(detail=True,methods=['GET','PUT'],url_path='renamecolumn',permission_classes=[IsAuthenticated])
-    def renamecolumn(self,request,pk=None):
-        return Response('ok')
+    @action(detail=True, methods=['GET', 'PUT'], url_path='renamecolumn', permission_classes=[IsAuthenticated])
+    def renamecolumn(self, request, pk=None):
+        file_upload = self.get_object()  # Get the file for the current user
+        
+        if request.method == 'GET':
+            file_path = file_upload.file_name.path
+            try:
+                df = pd.read_csv(file_path)
+                columns = df.columns.tolist()
+                return Response({"column_names": columns}, status=status.HTTP_200_OK)
+            except FileNotFoundError:
+                return Response({"error": "File not found."}, status=status.HTTP_404_NOT_FOUND)
+            except Exception as e:
+                return Response({"error": f"Error reading file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        elif request.method == 'PUT':
+            # Handle column renaming
+            serializer = self.get_serializer(instance=file_upload, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            result = serializer.update(file_upload, serializer.validated_data)  # Call update explicitly
+            return Response(result, status=status.HTTP_200_OK)
+       
+       
+    @action(detail=True, methods=['GET', 'PUT'], url_path='changedatatype', permission_classes=[IsAuthenticated])
+    def changedatatype(self, request, pk=None):
+        """
+        Handles changing the data types of selected columns in a CSV file.
+        """
+        file_upload = self.get_object()  # Get the file for the current user
+        
+        if request.method == 'GET':
+            # Provide available columns and their current data types
+            file_path = file_upload.file_name.path
+            try:
+                df = pd.read_csv(file_path)
+                columns_with_types = {col: str(df[col].dtype) for col in df.columns}
+                return Response({"columns": columns_with_types}, status=status.HTTP_200_OK)
+            except FileNotFoundError:
+                return Response({"error": "File not found."}, status=status.HTTP_404_NOT_FOUND)
+            except Exception as e:
+                return Response({"error": f"Error reading file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        elif request.method == 'PUT':
+            # Handle changing the data types
+            serializer = self.get_serializer(instance=file_upload, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            result = serializer.update(file_upload, serializer.validated_data)  # Call update explicitly
+            return Response(result, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['GET', 'PUT'], url_path='fillmissingvalue', permission_classes=[IsAuthenticated])
+    def fillmissingvalue(self, request, pk=None):
+        # Retrieve the file object
+        file_upload = self.get_object()
+
+        if request.method == 'GET':
+            # Handle file retrieval for preview, along with column data types and missing values
+            file_path = file_upload.file_name.path
+            try:
+                df = pd.read_csv(file_path)
+                
+                # Prepare column details: column name, data type, and missing values count
+                column_details = []
+                for column in df.columns:
+                    column_info = {
+                        'column_name': column,
+                        'data_type': str(df[column].dtype),  # Data type of the column
+                        'missing_values': int(df[column].isnull().sum())  # Count of missing values
+                    }
+                    column_details.append(column_info)
+                
+                return Response({'columns': column_details}, status=status.HTTP_200_OK)
+            
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        elif request.method == 'PUT':
+            # Handle filling missing values based on user input
+            serializer = self.get_serializer(instance=file_upload, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            result = serializer.update(file_upload, serializer.validated_data)  # Call update explicitly
+            return Response(result, status=status.HTTP_200_OK)
 
 
+
+    @action(detail=True, methods=['GET', 'PUT'], url_path='removeduplicates', permission_classes=[IsAuthenticated])
+    def removeduplicates(self, request, pk=None):
+        # Retrieve the file object
+        file_upload = self.get_object()
+
+        if request.method == 'GET':
+            # Handle file retrieval for preview, along with duplicated row information
+            file_path = file_upload.file_name.path
+            try:
+                df = pd.read_csv(file_path)
+
+                # Find duplicated rows (across all columns)
+                duplicate_rows = df[df.duplicated(keep=False)]
+
+                # Return the number of duplicated rows and the duplicated rows themselves
+                return Response(
+                    {
+                        "duplicated_rows": len(duplicate_rows),
+                        "rows": duplicate_rows.to_dict(orient='records'),
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        elif request.method == 'PUT':
+            # Handle removing duplicates
+            serializer = self.get_serializer(instance=file_upload, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            result = serializer.update(file_upload, serializer.validated_data)
+            return Response(result, status=status.HTTP_200_OK)
+
+
+    @action(detail=True, methods=['POST'], url_path='revertchanges', permission_classes=[IsAuthenticated])
+    def revertchanges(self, request, pk=None):
+        # Revert the file from its backup if it exists
+        file_upload = self.get_object()
+        file_path = file_upload.file_name.path
+        backup_path = f"{file_path}.backup"
+
+        if os.path.exists(backup_path):
+            # Restore the original file from backup
+            shutil.copy(backup_path, file_path)
+            return Response({"message": "Changes reverted successfully."}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "Backup not found, cannot revert changes."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 

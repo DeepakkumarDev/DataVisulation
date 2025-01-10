@@ -75,9 +75,6 @@ class DataOperationSerializer(serializers.Serializer):
 
 
 class RenameColumnSerializer(serializers.Serializer):
-    """
-    Serializer to handle renaming columns in the CSV file.
-    """
     new_column_names = serializers.DictField(
         child=serializers.CharField(),  # Each value in the dictionary will be a string (new column name)
         required=True,
@@ -85,16 +82,8 @@ class RenameColumnSerializer(serializers.Serializer):
     )
 
     def validate_new_column_names(self, value):
-        """
-        Custom validation for the new_column_names field.
-        Ensures that each new column name is unique and the old column name exists in the CSV file.
-        """
         if not value:
             raise serializers.ValidationError("No columns provided for renaming.")
-        
-        # You can add more validations here if needed, such as checking the structure of the column names
-        # For instance, check if the columns are valid names (no spaces, special characters, etc.)
-
         return value
 
 

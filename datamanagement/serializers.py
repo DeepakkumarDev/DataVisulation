@@ -66,6 +66,260 @@ class RemoveColumnSerializer(serializers.Serializer):
 
 
 
+class RenameColumnsSerializer(serializers.Serializer):
+    new_column_names = serializers.DictField(
+        child=serializers.CharField(),  # Each value in the dictionary will be a string (new column name)
+        required=True,
+        help_text="A dictionary where keys are current column names and values are new column names."
+    )
+
+    def validate_new_column_names(self, value):
+        if not value:
+            raise serializers.ValidationError("No columns provided for renaming.")
+        return value
+
+    class Meta:
+        fields = ['new_column_names']
+        
+    def update(self, instance, validated_data):
+        user = self.context.get('request').user
+        file_id = self.context.get('file_id')
+        new_column_names = validated_data.get('new_column_names', {})
+        renamed_columns = []
+
+        try:
+            file_instance = FileUpload.objects.get(user=user, id=file_id)
+            file_path = file_instance.file_name.path
+
+            if os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+
+                for old_col, new_col in new_column_names.items():
+                    if old_col in df.columns:
+                        df.rename(columns={old_col: new_col}, inplace=True)
+                        renamed_columns.append((old_col, new_col))
+                    else:
+                        raise serializers.ValidationError(f"Column '{old_col}' not found in the file")
+
+                # Save the updated DataFrame back to the file
+                df.to_csv(file_path, index=False)
+                return {
+                    "message": "Columns renamed successfully", 
+                    "renamed_columns": renamed_columns
+                }
+            else:
+                raise serializers.ValidationError("File not found")
+
+        except FileUpload.DoesNotExist:
+            raise serializers.ValidationError("File not found")
+  
+
+import numpy as np
+import pandas as pd
+import os
+from rest_framework import serializers
+from .models import FileUpload  # Assuming your FileUpload model is in the current module
+
+import os
+import pandas as pd
+import numpy as np
+from rest_framework import serializers
+from .models import FileUpload
+
+class ChangeDataTypeSerializer(serializers.Serializer):
+    # Define a list of available data types for conversion
+    dtype_mapping = [
+        ('object', 'Object (String)'),
+        ('int64', 'Integer (64-bit)'),
+        ('int32', 'Integer (32-bit)'),
+        ('int16', 'Integer (16-bit)'),
+        ('int8', 'Integer (8-bit)'),
+        ('float64', 'Float (64-bit)'),
+        ('float32', 'Float (32-bit)'),
+        ('bool', 'Boolean'),
+        ('datetime64[ns]', 'Datetime'),
+        ('timedelta[ns]', 'Timedelta'),
+        ('category', 'Category'),
+        ('string', 'String'),
+        ('Int64', 'Nullable Integer (64-bit)'),
+        ('Float64', 'Nullable Float (64-bit)'),
+    ]
+
+    column_name = serializers.CharField(max_length=255, help_text="Name of the column to change its data type.")
+    new_data_type = serializers.ChoiceField(choices=dtype_mapping, help_text="Select the new data type for the column.")
+
+    class Meta:
+        fields = ['column_name', 'new_data_type']
+
+    def validate(self, data):
+        """
+        Custom validation to ensure valid data types and valid columns.
+        """
+        file_id = self.context.get('file_id')
+        user = self.context.get('request').user
+
+        try:
+            # Ensure the file exists
+            file_instance = FileUpload.objects.get(user=user, id=file_id)
+            file_path = file_instance.file_name.path
+            if not os.path.exists(file_path):
+                raise serializers.ValidationError("The file does not exist.")
+
+            df = pd.read_csv(file_path)
+            if data['column_name'] not in df.columns:
+                raise serializers.ValidationError(f"Column '{data['column_name']}' not found in the file.")
+        except FileUpload.DoesNotExist:
+            raise serializers.ValidationError("File not found.")
+        except Exception as e:
+            raise serializers.ValidationError(f"Error while validating file: {str(e)}")
+        return data
+
+    def update(self, instance, validated_data):
+        """
+        Update the CSV file by changing the data type of the specified column.
+        """
+        user = self.context.get('request').user
+        file_id = self.context.get('file_id')
+        column_name = validated_data['column_name']
+        new_data_type = validated_data['new_data_type']
+
+        try:
+            # Get the file instance and read the CSV file
+            file_instance = FileUpload.objects.get(user=user, id=file_id)
+            file_path = file_instance.file_name.path
+
+            if os.path.exists(file_path):
+                # Read the CSV file
+                df = pd.read_csv(file_path)
+
+                # Handle special cases for data type conversions
+                if new_data_type == 'object':
+                    # Convert the column to object (string) type
+                    df[column_name] = df[column_name].astype(str)
+                elif new_data_type in ['int64', 'Int64']:
+                    # Convert the column to int64 or nullable Int64, handling errors
+                    df[column_name] = pd.to_numeric(df[column_name], errors='coerce').astype('Int64')  # For nullable Int64
+                else:
+                    # General conversion for other types
+                    df[column_name] = df[column_name].astype(new_data_type)
+
+                # Save the updated DataFrame back to the file
+                df.to_csv(file_path, index=False)
+
+                return {"message": f"Data type of column '{column_name}' changed successfully to '{new_data_type}'."}
+            else:
+                raise serializers.ValidationError("File not found.")
+        except FileUpload.DoesNotExist:
+            raise serializers.ValidationError("File not found.")
+        except Exception as e:
+            raise serializers.ValidationError(f"An error occurred: {str(e)}")
+
+
+
+class FillMissingValueSerializer(serializers.Serializer):
+    method = [
+        ('mean', 'Mean'),
+        ('median', 'Median'),
+        ('mode', 'Mode'),
+        ('bfill', 'Backward Fill (bfill)'),
+        ('ffill', 'Forward Fill (ffill)')
+    ]
+    column_name = serializers.CharField(max_length=255)
+    method_name = serializers.ChoiceField(choices=method)
+
+    def update(self, instance, validated_data):
+        """
+        Update the CSV file by filling missing numeric values in the specified column.
+        """
+        user = self.context.get('request').user
+        file_id = self.context.get('file_id')
+        column_name = validated_data['column_name']
+        method_name = validated_data['method_name']
+
+        try:
+            # Get the file instance and path
+            file_instance = FileUpload.objects.get(user=user, id=file_id)
+            file_path = file_instance.file_name.path
+
+            if os.path.exists(file_path):
+                # Read the CSV file
+                df = pd.read_csv(file_path)
+
+                # Check if the column exists in the dataframe
+                if column_name not in df.columns:
+                    raise serializers.ValidationError(f"Column '{column_name}' not found in the file.")
+
+                # Apply the selected method to fill missing values
+                if method_name == 'mean':
+                    df[column_name].fillna(df[column_name].mean(), inplace=True)
+                elif method_name == 'median':
+                    df[column_name].fillna(df[column_name].median(), inplace=True)
+                elif method_name == 'mode':
+                    df[column_name].fillna(df[column_name].mode()[0], inplace=True)
+                elif method_name == 'bfill':
+                    df[column_name].fillna(method='bfill', inplace=True)
+                elif method_name == 'ffill':
+                    df[column_name].fillna(method='ffill', inplace=True)
+                else:
+                    raise serializers.ValidationError(f"Invalid method '{method_name}' for filling missing values.")
+
+                # Save the updated DataFrame back to the CSV file
+                df.to_csv(file_path, index=False)
+                return {"message": f"Missing values in column '{column_name}' filled using '{method_name}' method."}
+            else:
+                raise serializers.ValidationError("File not found.")
+        except FileUpload.DoesNotExist:
+            raise serializers.ValidationError("File not found.")
+        except Exception as e:
+            raise serializers.ValidationError(f"An error occurred: {str(e)}")
+
+    
+class RemoveDuplicateSerializer(serializers.Serializer):
+    """
+    Serializer for removing duplicate rows from a CSV file.
+    """
+    # Specify the column(s) by which to remove duplicates (optional).
+    # If no columns are provided, duplicates are removed across all columns.
+    subset_columns = serializers.ListField(
+        child=serializers.CharField(max_length=255), required=False, allow_null=True, allow_empty=True
+    )
+
+    def update(self, instance, validated_data):
+        user = self.context.get('request').user
+        file_id = self.context.get('file_id')
+        subset_columns = validated_data.get('subset_columns', None)
+
+        try:
+            file_instance = FileUpload.objects.get(user=user, id=file_id)
+            file_path = file_instance.file_name.path
+
+            if os.path.exists(file_path):
+                # Read the CSV file
+                df = pd.read_csv(file_path)
+
+                # Remove duplicates based on the provided subset columns or entire dataframe if not provided
+                if subset_columns:
+                    df = df.drop_duplicates(subset=subset_columns)
+                else:
+                    df = df.drop_duplicates()
+
+                # Save the updated DataFrame back to the file
+                df.to_csv(file_path, index=False)
+
+                return {"message": "Duplicates removed successfully", "remaining_rows": len(df)}
+            else:
+                return {"error": "File not found"}
+
+        except FileUpload.DoesNotExist:
+            raise serializers.ValidationError("File not found")
+        except Exception as e:
+            raise serializers.ValidationError(f"An error occurred: {str(e)}")
+
+
+
+
+
+
 
 
 
