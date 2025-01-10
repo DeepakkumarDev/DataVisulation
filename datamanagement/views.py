@@ -13,8 +13,96 @@ from rest_framework.permissions import IsAuthenticated,IsAdminUser
 from rest_framework import status
 from .models import FileUpload,UserTable,CreateTable,Customer
 from .serializers import FileUploadSerializer,UserTableSerializer,CreateTableSerializer,AppendTableSerializer,\
-    DataCleanSerializer,TableVisulationSerializer,BuildTableSerializer,CustomerSerializer
+    DataCleanSerializer,TableVisulationSerializer,BuildTableSerializer,CustomerSerializer,RemoveColumnSerializer
 from .dataclean_serializers import DataOperationSerializer,RenameColumnSerializer
+
+
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.viewsets import ModelViewSet
+from django.db.models import Value
+import os
+import pandas as pd
+from .models import FileUpload
+from .serializers import FileUploadSerializer, RemoveColumnSerializer
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.decorators import action
+import pandas as pd
+import os
+from .models import FileUpload
+from .serializers import RemoveColumnSerializer
+
+class FileUploadViewSet(ModelViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = FileUpload.objects.filter(user=self.request.user).all()
+        if self.request.method in ['PUT']:
+            file_id = self.kwargs.get('pk') 
+            columns = []
+            try:
+                file_instance = FileUpload.objects.get(user=self.request.user, id=file_id)
+                file_path = file_instance.file_name.path
+                if os.path.exists(file_path):
+                    df = pd.read_csv(file_path)
+                    columns = list(df.columns)
+                else:
+                    return queryset.none()
+            except FileUpload.DoesNotExist:
+                return queryset.none()  # Return an empty queryset if file not found
+            except FileNotFoundError as e:
+                return queryset.annotate(column_names=Value(f"Error: {str(e)}"))
+            except Exception as e:
+                return queryset.annotate(column_names=Value(f"Error reading file: {str(e)}"))
+            queryset = queryset.annotate(column_names=Value(', '.join(columns) if columns else "No columns found"))
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'removecolumn':
+            return RemoveColumnSerializer
+        return FileUploadSerializer
+
+    def get_serializer_context(self):
+        # Pass file_id and request to serializer
+        context = super().get_serializer_context()
+        context['file_id'] = self.kwargs.get('pk')
+        context['request'] = self.request
+        return context
+
+    @action(detail=True, methods=['GET', 'PUT'], url_path='removecolumn', permission_classes=[IsAuthenticated])
+    def removecolumn(self, request, pk=None):
+        file_upload = self.get_object()  # Get the file for the current user
+
+        if request.method == 'GET':
+            # Provide available columns for the file
+            file_path = file_upload.file_name.path
+            try:
+                df = pd.read_csv(file_path)
+                columns = df.columns.tolist()
+                return Response({"column_names": columns}, status=status.HTTP_200_OK)
+            except FileNotFoundError:
+                return Response({"error": "File not found."}, status=status.HTTP_404_NOT_FOUND)
+            except Exception as e:
+                return Response({"error": f"Error reading file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        elif request.method == 'PUT':
+            # Handle the column removal
+            serializer = self.get_serializer(instance=file_upload, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            result = serializer.update(file_upload, serializer.validated_data)  # Call update explicitly
+            return Response(result, status=status.HTTP_200_OK)
+        
+    
+    @action(detail=True,methods=['GET','PUT'],url_path='renamecolumn',permission_classes=[IsAuthenticated])
+    def renamecolumn(self,request,pk=None):
+        return Response('ok')
+
+
+
 
 
 

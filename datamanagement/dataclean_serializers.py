@@ -11,6 +11,9 @@ from rest_framework import serializers
 from .models import FileUpload
 
 
+
+
+
 class DataOperationSerializer(serializers.Serializer):
     file_name = serializers.CharField(max_length=255, read_only=True)
     column_names = serializers.CharField(max_length=255)  # Changed to 'column_names' for clarity
@@ -93,3 +96,7 @@ class RenameColumnSerializer(serializers.Serializer):
         # For instance, check if the columns are valid names (no spaces, special characters, etc.)
 
         return value
+
+
+
+

@@ -10,6 +10,63 @@ from django.core.exceptions import ValidationError
 from rest_framework import serializers
 from .models import FileUpload,UserTable,CreateTable,Customer
 
+class RemoveColumnSerializer(serializers.Serializer):
+    column_names = serializers.CharField(write_only=True)  # Input for column names to remove
+
+    class Meta:
+        fields = ['column_names']
+
+    def create(self, validated_data):
+        # This method should not be used since we are not creating anything.
+        raise NotImplementedError("The `create` method is not supported in this serializer. Use `update` to modify the file.")
+
+    def update(self, instance, validated_data):
+        user = self.context.get('request').user
+        file_id = self.context.get('file_id')
+
+        # Fetch the file instance based on user and file_id
+        try:
+            file_instance = FileUpload.objects.get(user=user, id=file_id)
+            file_path = file_instance.file_name.path
+
+            if not os.path.exists(file_path):
+                raise serializers.ValidationError(f"File '{file_path}' does not exist.")
+        except FileUpload.DoesNotExist:
+            raise serializers.ValidationError("File not found for the given ID.")
+        except Exception as e:
+            raise serializers.ValidationError(f"Error accessing file: {str(e)}")
+
+        # Extract the column names to be removed
+        column_names = validated_data.get('column_names')
+        column_list = re.split(r'[,\s:]+', column_names.strip())
+
+        try:
+            # Read the file into a DataFrame
+            df = pd.read_csv(file_path)
+
+            # Check if the specified columns exist
+            missing_columns = [col for col in column_list if col not in df.columns]
+            if missing_columns:
+                raise serializers.ValidationError(f"Columns {', '.join(missing_columns)} do not exist in the file.")
+
+            # Drop the specified columns
+            df.drop(columns=column_list, inplace=True)
+
+            # Save the updated DataFrame back to the file
+            df.to_csv(file_path, index=False)
+
+            return {
+                "file_name": file_instance.file_name.name,
+                "removed_columns": column_list,
+                "operation": f"Columns {', '.join(column_list)} have been removed from the file '{file_instance.file_name.name}'."
+            }
+        except Exception as e:
+            raise serializers.ValidationError(f"Error processing the file: {str(e)}")
+
+
+
+
+
 
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -82,11 +139,14 @@ class DataCleanSerializer(serializers.Serializer):
 class FileUploadSerializer(serializers.ModelSerializer):
     class Meta:
         model = FileUpload 
-        fields = ['file_name']
+        fields = ["id",'file_name']
 
     def create(self, validated_data):
         user = self.context.get('request').user
         return FileUpload.objects.create(user=user, **validated_data)
+    
+    
+    
 
 class TableVisulationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -167,7 +227,6 @@ class AppendTableSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         file_upload_instance = validated_data.get('file_name')
         table_name = validated_data.get('table_name')
-
         if not file_upload_instance:
             raise serializers.ValidationError("No file provided")
 
@@ -206,6 +265,7 @@ class AppendTableSerializer(serializers.ModelSerializer):
         """
         columns = list(df.columns)
         values = []
+        data = [tuple(row) for row in df.values]
 
         # Prepare values for bulk insertion
         for _, row in df.iterrows():
@@ -499,7 +559,6 @@ class CreateTableSerializer(serializers.ModelSerializer):
                 file_name=file_upload_instance,
                 database_table=True
             )
-
         return create_table_instance
 
     def clean_dataframe(self, df):
@@ -520,6 +579,9 @@ class CreateTableSerializer(serializers.ModelSerializer):
             cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
             result = cursor.fetchone()
             return result is not None
+        
+
+
 
     def generate_create_table_sql_from_dataframe(self, table_name, df):
         """
@@ -576,10 +638,3 @@ class CreateTableSerializer(serializers.ModelSerializer):
         with connection.cursor() as cursor:
             cursor.executemany(insert_query, data)
 
-    def table_exists(self, table_name):
-        """
-        Check if the table already exists in the database.
-        """
-        with connection.cursor() as cursor:
-            cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
-            return cursor.fetchone() is not None

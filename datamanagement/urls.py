@@ -6,6 +6,8 @@ router = DefaultRouter()
 router.register('data-clean',views.DataCleanViewSet,basename='data-clean')
 router.register('remove-column',views.DataOperationViewSet,basename='remove-column')
 router.register('customers',views.CustomerViewSet,basename='customers')
+router.register('fileuploads',views.FileUploadViewSet,basename='fileuploads')
+
 
 urlpatterns = [
     path('',include(router.urls)),
